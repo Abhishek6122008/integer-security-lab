@@ -4,6 +4,7 @@
 
 int main(void)
 {
+    //here just for demonstration we overflow 32 bit integer by adding 1 to its max value 
     int32_t a = INT32_MAX;
     int32_t b = 1;
     int32_t result = a + b;

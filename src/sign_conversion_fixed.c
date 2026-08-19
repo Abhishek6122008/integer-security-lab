@@ -4,6 +4,7 @@
 
 int main(void)
 {
+    //since unsigned cannot have negative intgers we just check if this integer is more than 0 or not
     int32_t signed_value = -10;
 
     if (signed_value < 0)
