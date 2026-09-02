@@ -31,35 +31,41 @@ th,td{border:1px solid #000;padding:5px 8px;text-align:center}
 <ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler</li><li>VS Code</li><li>Git and GitHub</li></ul>
 <h2>Procedure:</h2>
 <h3>a) Vulnerable Version (question1/unsafe.c)</h3>
-<p class="body">Each value is assigned directly to the smaller or differently signed type with no checking. The value is printed before and after the conversion so the loss of information is visible.</p>
+<p class="body">Each value is assigned directly to the smaller or differently signed type with no checking. The value is printed before and after the conversion so the loss of information is visible. The sources are marked volatile so that the compiler cannot fold the conversions away at compile time, and the truncated short is then used as an index into a 10 byte heap buffer, which is the memory error used in Assignment-3.</p>
 <pre>#include &lt;stdio.h&gt;
 #include &lt;stdlib.h&gt;
 
 int main(void)
 {
-    // int is 4 bytes and short is only 2 bytes, so 70000 does not fit
-    // the extra bits are thrown away and we get 4464 instead
-    int big = 70000;
+    // volatile stops gcc from folding these at compile time, so the
+    // conversions really happen while the program runs
+    volatile int big = 70000;
     short s = big;
-    printf("int %d -&gt; short %d\n", big, s);
+    printf("int %d -&gt; short %d
+", big, s);
 
-    // unsigned cannot hold negative numbers, so -1 is reinterpreted
-    // as the bit pattern all 1s, which prints as 4294967295
-    int neg = -1;
+    volatile int neg = -1;
     unsigned int u = neg;
-    printf("signed %d -&gt; unsigned %u\n", neg, u);
+    printf("signed %d -&gt; unsigned %u
+", neg, u);
 
-    // 3.9e9 is bigger than INT_MAX (about 2.1e9), converting it to int
-    // is undefined behaviour so the value we get is garbage
-    float f = 3.9e9f;
+    volatile float f = 3.9e9f;
     int i = f;
-    printf("float %.1f -&gt; int %d\n", f, i);
+    printf("float %.1f -&gt; int %d
+", f, i);
 
-    // atoi cannot report an error, the string is too big for an int
-    // so it just returns a wrong value silently
     const char *text = "99999999999999";
     int n = atoi(text);
-    printf("string \"%s\" -&gt; int %d\n", text, n);
+    printf("string \"%s\" -&gt; int %d
+", text, n);
+
+    // the truncated value from above is used as an array index,
+    // 4464 % 100 = 64, still far outside a 10 byte buffer
+    char *buf = malloc(10);
+    buf[s % 100] = 'x';
+    printf("wrote to buf[%d]
+", s % 100);
+    free(buf);
 
     return 0;
 }</pre>
@@ -131,15 +137,16 @@ int main(void)
 
 <div class="page">
 <h1>Lab Assignment-3</h1>
-<p><b>Aim:</b> To compile the type-conversion program under four configurations (no flags, -Wall -Wextra, UBSan, ASan), capture the compiler and runtime diagnostics, and compare which defects each configuration catches and which it misses.</p>
+<p><b>Aim:</b> To compile the type-conversion program under four configurations (no flags, -Wall -Wextra -Wconversion, UBSan, ASan), capture the compiler and runtime diagnostics, and compare which defects each configuration catches and which it misses.</p>
 <h2>Tools Used:</h2>
 <ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler with sanitizers</li><li>VS Code</li><li>Git and GitHub</li></ul>
 <h2>Compilation Commands:</h2>
 <pre># 1. no flags at all, the compiler stays silent
 gcc ../question1/unsafe.c -o out/a1
 
-# 2. compile time warnings about conversions that lose value
-gcc -Wall -Wextra ../question1/unsafe.c -o out/a2
+# 2. compile time warnings, -Wconversion is the one that reports
+#    conversions that lose value
+gcc -Wall -Wextra -Wconversion ../question1/unsafe.c -o out/a2
 
 # 3. UBSan, reports undefined behaviour while the program runs
 gcc -fsanitize=undefined -g ../question1/unsafe.c -o out/a3
@@ -150,7 +157,7 @@ gcc -fsanitize=address -g ../question1/unsafe.c -o out/a4</pre>
 <h2>Diagnostic Outputs:</h2>
 <p class="body"><b>1. No flags</b></p>
 <div class="ph">[ paste out/1_noflags.txt screenshot ]</div>
-<p class="body"><b>2. -Wall -Wextra</b></p>
+<p class="body"><b>2. -Wall -Wextra -Wconversion</b></p>
 <div class="ph">[ paste out/2_wall.txt screenshot ]</div>
 </div>
 
@@ -161,13 +168,14 @@ gcc -fsanitize=address -g ../question1/unsafe.c -o out/a4</pre>
 <div class="ph">[ paste out/4_asan.txt screenshot ]</div>
 <h2>Analysis:</h2>
 <table>
-<tr><th>Defect</th><th>No flags</th><th>-Wall -Wextra</th><th>UBSan</th><th>ASan</th></tr>
-<tr><td>int &rarr; short truncation</td><td>miss</td><td>warn</td><td>miss</td><td>miss</td></tr>
-<tr><td>signed &rarr; unsigned wrap</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
-<tr><td>float &rarr; int out of range</td><td>miss</td><td>warn</td><td>catch</td><td>miss</td></tr>
-<tr><td>bad string &rarr; atoi</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
+<tr><th>Defect</th><th>No flags</th><th>-Wall -Wextra</th><th>-Wconversion</th><th>UBSan</th><th>ASan</th></tr>
+<tr><td>int &rarr; short truncation</td><td>miss</td><td>miss</td><td>warn</td><td>miss</td><td>miss</td></tr>
+<tr><td>signed &rarr; unsigned wrap</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
+<tr><td>float &rarr; int out of range</td><td>miss</td><td>miss</td><td>warn</td><td>catch</td><td>miss</td></tr>
+<tr><td>bad string &rarr; atoi</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
+<tr><td>heap write past buffer</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td><td>catch</td></tr>
 </table>
-<p class="body"><b>No flags</b> compiles silently and prints wrong values with no indication of a problem. <b>-Wall -Wextra</b> adds static analysis at compile time and reports the conversions that lose value where the compiler can see the constants, but it cannot see values computed at runtime. <b>UBSan</b> instruments the binary and reports the float-to-int conversion at runtime because it is undefined behaviour; it does not report the truncation or the sign conversion, since both are defined behaviour in C even though the result is not what the programmer wanted. <b>ASan</b> detects memory errors such as buffer overflow and use-after-free; this program has none, so it reports nothing, which shows ASan and UBSan cover different classes of defect and are not substitutes for each other.</p>
+<p class="body">Two things had to be arranged before the flags had anything to report. The conversion sources are marked <b>volatile</b> so that gcc cannot fold them at compile time and skip instrumenting them, and the truncated short is used as an index into a 10 byte heap buffer so that there is a real memory error for ASan to find. <b>No flags</b> compiles silently and prints wrong values with no indication of a problem. <b>-Wall -Wextra</b> on their own report nothing here, because implicit conversions are legal C; <b>-Wconversion</b> is the flag that reports them, at compile time, before the program is ever run. <b>UBSan</b> instruments the binary and reports the float-to-int conversion at runtime because it is undefined behaviour; it does not report the truncation or the sign conversion, since both are defined behaviour in C even though the result is not what the programmer wanted. <b>ASan</b> reports the heap-buffer-overflow write with the line number of both the write and the malloc, but says nothing about any conversion. Signed-to-unsigned conversion and the failed atoi are caught by none of the four, because both are perfectly legal C, which is why the explicit range checks in the safe version are still necessary.</p>
 <h2>Results:</h2>
 <p class="body">The four configurations were compared and each was found to catch a different subset of defects. Warnings are cheap and catch mistakes before the program runs, sanitizers catch real runtime values but only for undefined behaviour, and defined-but-incorrect conversions such as truncation, sign change and a failed atoi are caught by none of them. Compiler hardening flags therefore reduce risk but do not replace the explicit range checks written in the safe version.</p>
 </div>

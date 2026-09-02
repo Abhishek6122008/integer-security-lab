@@ -9,8 +9,9 @@ gcc $SRC -o out/a1 2> out/1_noflags.txt
 ./out/a1 >> out/1_noflags.txt 2>&1
 
 # 2. -Wall -Wextra turns on the compile time warnings about
-#    conversions that lose value
-gcc -Wall -Wextra $SRC -o out/a2 2> out/2_wall.txt
+#    conversions that lose value, -Wconversion is the one that catches
+#    int to short and float to int
+gcc -Wall -Wextra -Wconversion $SRC -o out/a2 2> out/2_wall.txt
 ./out/a2 >> out/2_wall.txt 2>&1
 
 # 3. UBSan instruments the program so undefined behaviour like the
@@ -18,8 +19,8 @@ gcc -Wall -Wextra $SRC -o out/a2 2> out/2_wall.txt
 gcc -fsanitize=undefined -g $SRC -o out/a3 2> out/3_ubsan.txt
 ./out/a3 >> out/3_ubsan.txt 2>&1
 
-# 4. ASan checks memory errors at runtime, this program has none
-#    so it should report nothing
+# 4. ASan checks memory errors at runtime, it catches the heap write
+#    past the end of buf that the other three builds miss
 gcc -fsanitize=address -g $SRC -o out/a4 2> out/4_asan.txt
 ./out/a4 >> out/4_asan.txt 2>&1
 
