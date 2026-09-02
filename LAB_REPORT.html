@@ -59,59 +59,48 @@ int main(void)
 
 <div class="page">
 <h3>b) Safe Version (question1/safe.c)</h3>
-<p class="body">Every conversion goes through a helper that checks the value against the limits of the destination type first. If the value does not fit, the helper returns 0 and the program prints a clear error message instead of storing a wrong value. strtol replaces atoi because it reports both invalid text and out-of-range values.</p>
+<p class="body">The same four conversions are written again, but each one is guarded by an if statement that compares the value with the limits of the destination type taken from limits.h. If the value does not fit, the program prints a clear error message instead of storing a wrong value. atoi is replaced by strtol, which returns a long, so the string result can be range checked before it is put into an int.</p>
 <pre>#include &lt;stdio.h&gt;
 #include &lt;stdlib.h&gt;
 #include &lt;limits.h&gt;
-#include &lt;errno.h&gt;
-#include &lt;math.h&gt;
 
-static int int_to_short(int v, short *out)
+int main(void)
 {
-    if (v &lt; SHRT_MIN || v &gt; SHRT_MAX) return 0;
-    *out = (short)v; return 1;
-}
+    int big = 70000;
+    if (big &lt; SHRT_MIN || big &gt; SHRT_MAX)
+        printf("Error: %d does not fit in a short\n", big);
+    else
+        printf("int %d -&gt; short %d\n", big, (short)big);
 
-static int int_to_unsigned(int v, unsigned int *out)
-{
-    if (v &lt; 0) return 0;
-    *out = (unsigned int)v; return 1;
-}
+    int neg = -1;
+    if (neg &lt; 0)
+        printf("Error: %d is negative, cannot make it unsigned\n", neg);
+    else
+        printf("signed %d -&gt; unsigned %u\n", neg, (unsigned int)neg);
 
-static int float_to_int(float f, int *out)
-{
-    if (isnan(f) || f &lt; (float)INT_MIN || f &gt; (float)INT_MAX) return 0;
-    *out = (int)f; return 1;
-}
+    float f = 3.9e9f;
+    if (f &lt; (float)INT_MIN || f &gt; (float)INT_MAX)
+        printf("Error: float %.1f is outside int range\n", f);
+    else
+        printf("float %.1f -&gt; int %d\n", f, (int)f);
 
-static int string_to_int(const char *s, int *out)
-{
-    char *end; errno = 0;
-    long v = strtol(s, &amp;end, 10);
-    if (end == s || *end != '\0') return 0;
-    if (errno == ERANGE || v &lt; INT_MIN || v &gt; INT_MAX) return 0;
-    *out = (int)v; return 1;
-}</pre>
-<pre>int main(void)
-{
-    int big = 70000; short s;
-    if (int_to_short(big, &amp;s)) printf("int %d -&gt; short %d\n", big, s);
-    else printf("Error: %d does not fit in a short\n", big);
-
-    int neg = -1; unsigned int u;
-    if (int_to_unsigned(neg, &amp;u)) printf("signed %d -&gt; unsigned %u\n", neg, u);
-    else printf("Error: %d is negative, cannot convert to unsigned\n", neg);
-
-    float f = 3.9e9f; int i;
-    if (float_to_int(f, &amp;i)) printf("float %.1f -&gt; int %d\n", f, i);
-    else printf("Error: float %.1f is outside int range\n", f);
-
-    const char *text = "99999999999999"; int n;
-    if (string_to_int(text, &amp;n)) printf("string \"%s\" -&gt; int %d\n", text, n);
-    else printf("Error: string \"%s\" is not a valid int\n", text);
+    const char *text = "99999999999999";
+    long v = strtol(text, NULL, 10);
+    if (v &lt; INT_MIN || v &gt; INT_MAX)
+        printf("Error: string \"%s\" is too big for an int\n", text);
+    else
+        printf("string \"%s\" -&gt; int %d\n", text, (int)v);
 
     return 0;
 }</pre>
+<h2>Comparison of the two versions:</h2>
+<table>
+<tr><th>Conversion</th><th>Unsafe version</th><th>Safe version</th></tr>
+<tr><td>int &rarr; short</td><td>stores 4464</td><td>range check, error message</td></tr>
+<tr><td>signed &rarr; unsigned</td><td>stores 4294967295</td><td>negative check, error message</td></tr>
+<tr><td>float &rarr; int</td><td>undefined value</td><td>range check, error message</td></tr>
+<tr><td>string &rarr; int</td><td>atoi, silent wrong value</td><td>strtol, range check, error message</td></tr>
+</table>
 </div>
 
 <div class="page">
