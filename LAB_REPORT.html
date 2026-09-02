@@ -1,0 +1,160 @@
+<meta charset="utf-8">
+<title>Secure Coding Lab Report</title>
+<style>
+body{font-family:"Times New Roman",serif;font-size:12pt;margin:0;background:#fff}
+.page{border:2px solid #000;padding:36px 44px;margin:18px auto;width:700px;min-height:960px;box-sizing:border-box;page-break-after:always}
+h1{text-align:center;text-decoration:underline;font-size:20pt}
+h2{font-size:13pt;margin-top:22px}
+h3{font-size:12pt;margin-left:18px}
+p,li{line-height:1.5;text-align:justify}
+.body{margin-left:18px}
+pre{background:#000;color:#fff;padding:10px 14px;font-family:Consolas,monospace;font-size:10pt;white-space:pre-wrap;line-height:1.45}
+.ph{border:1px dashed #888;background:#f4f4f4;color:#555;padding:26px;text-align:center;font-style:italic;margin:10px 0}
+table{border-collapse:collapse;width:100%;font-size:11pt}
+th,td{border:1px solid #000;padding:5px 8px;text-align:center}
+@media print{.page{margin:0}}
+</style>
+
+<div class="page" style="text-align:center">
+<h2 style="text-decoration:underline;font-size:18pt">Practical File</h2>
+<p style="margin:26px 0"><i>[ paste university logo here ]</i></p>
+<h2 style="font-size:17pt">K. R. MANGALAM UNIVERSITY<br>BTech (AI &amp; ML)<br>SOET</h2>
+<p><b>(School of Engineering and Technology)</b></p>
+<p style="margin-top:40px;font-size:15pt"><b>NAME: Abhishek Chaudhary<br>ROLL NO: 2301730075<br>COURSE: Secure Coding and Vulnerabilities Lab<br>(ENSP351)</b></p>
+<p style="margin-top:60px">K. R. MANGALAM UNIVERSITY, SOHNA ROAD<br>GURUGRAM HARYANA<br>122102</p>
+</div>
+
+<div class="page">
+<h1>Lab Assignment-2</h1>
+<p><b>Aim:</b> To convert values between data types (int to short, signed to unsigned, float to int, and string to numeric), observe the unsafe behaviour caused by truncation, sign conversion and overflow, and then implement safe conversion helpers that validate the value before converting and reject out-of-range inputs.</p>
+<h2>Tools Used:</h2>
+<ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler</li><li>VS Code</li><li>Git and GitHub</li></ul>
+<h2>Procedure:</h2>
+<h3>a) Vulnerable Version (question1/unsafe.c)</h3>
+<p class="body">Each value is assigned directly to the smaller or differently signed type with no checking. The value is printed before and after the conversion so the loss of information is visible.</p>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+int main(void)
+{
+    int big = 70000;
+    short s = big;
+    printf("int %d -&gt; short %d\n", big, s);
+
+    int neg = -1;
+    unsigned int u = neg;
+    printf("signed %d -&gt; unsigned %u\n", neg, u);
+
+    float f = 3.9e9f;
+    int i = f;
+    printf("float %.1f -&gt; int %d\n", f, i);
+
+    const char *text = "99999999999999";
+    int n = atoi(text);
+    printf("string \"%s\" -&gt; int %d\n", text, n);
+
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h3>b) Safe Version (question1/safe.c)</h3>
+<p class="body">Every conversion goes through a helper that checks the value against the limits of the destination type first. If the value does not fit, the helper returns 0 and the program prints a clear error message instead of storing a wrong value. strtol replaces atoi because it reports both invalid text and out-of-range values.</p>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;limits.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;math.h&gt;
+
+static int int_to_short(int v, short *out)
+{
+    if (v &lt; SHRT_MIN || v &gt; SHRT_MAX) return 0;
+    *out = (short)v; return 1;
+}
+
+static int int_to_unsigned(int v, unsigned int *out)
+{
+    if (v &lt; 0) return 0;
+    *out = (unsigned int)v; return 1;
+}
+
+static int float_to_int(float f, int *out)
+{
+    if (isnan(f) || f &lt; (float)INT_MIN || f &gt; (float)INT_MAX) return 0;
+    *out = (int)f; return 1;
+}
+
+static int string_to_int(const char *s, int *out)
+{
+    char *end; errno = 0;
+    long v = strtol(s, &amp;end, 10);
+    if (end == s || *end != '\0') return 0;
+    if (errno == ERANGE || v &lt; INT_MIN || v &gt; INT_MAX) return 0;
+    *out = (int)v; return 1;
+}</pre>
+<pre>int main(void)
+{
+    int big = 70000; short s;
+    if (int_to_short(big, &amp;s)) printf("int %d -&gt; short %d\n", big, s);
+    else printf("Error: %d does not fit in a short\n", big);
+
+    int neg = -1; unsigned int u;
+    if (int_to_unsigned(neg, &amp;u)) printf("signed %d -&gt; unsigned %u\n", neg, u);
+    else printf("Error: %d is negative, cannot convert to unsigned\n", neg);
+
+    float f = 3.9e9f; int i;
+    if (float_to_int(f, &amp;i)) printf("float %.1f -&gt; int %d\n", f, i);
+    else printf("Error: float %.1f is outside int range\n", f);
+
+    const char *text = "99999999999999"; int n;
+    if (string_to_int(text, &amp;n)) printf("string \"%s\" -&gt; int %d\n", text, n);
+    else printf("Error: string \"%s\" is not a valid int\n", text);
+
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h2>Output:</h2>
+<p class="body"><b>Unsafe version:</b></p>
+<div class="ph">[ paste terminal screenshot of ./unsafe here ]</div>
+<p class="body"><b>Safe version:</b></p>
+<div class="ph">[ paste terminal screenshot of ./safe here ]</div>
+<h2>Results:</h2>
+<p class="body">The unsafe program converted every value without checking and produced wrong results: 70000 was truncated to 4464 in a short, -1 became 4294967295 as an unsigned int, 3.9e9 was outside the range of int, and atoi silently returned a clamped value for a string too large for int. The safe program used range checks against SHRT_MIN/SHRT_MAX and INT_MIN/INT_MAX, and strtol with errno, so every out-of-range conversion was rejected with a clear error message instead of storing a corrupted value. This shows that in C a narrowing or sign-changing conversion never reports failure by itself, and validation must be written by the programmer.</p>
+</div>
+
+<div class="page">
+<h1>Lab Assignment-3</h1>
+<p><b>Aim:</b> To compile the type-conversion program under four configurations (no flags, -Wall -Wextra, UBSan, ASan), capture the compiler and runtime diagnostics, and compare which defects each configuration catches and which it misses.</p>
+<h2>Tools Used:</h2>
+<ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler with sanitizers</li><li>VS Code</li><li>Git and GitHub</li></ul>
+<h2>Compilation Commands:</h2>
+<pre>gcc ../question1/unsafe.c -o out/a1
+gcc -Wall -Wextra ../question1/unsafe.c -o out/a2
+gcc -fsanitize=undefined -g ../question1/unsafe.c -o out/a3
+gcc -fsanitize=address -g ../question1/unsafe.c -o out/a4</pre>
+<h2>Diagnostic Outputs:</h2>
+<p class="body"><b>1. No flags</b></p>
+<div class="ph">[ paste out/1_noflags.txt screenshot ]</div>
+<p class="body"><b>2. -Wall -Wextra</b></p>
+<div class="ph">[ paste out/2_wall.txt screenshot ]</div>
+</div>
+
+<div class="page">
+<p class="body"><b>3. -fsanitize=undefined (UBSan)</b></p>
+<div class="ph">[ paste out/3_ubsan.txt screenshot ]</div>
+<p class="body"><b>4. -fsanitize=address (ASan)</b></p>
+<div class="ph">[ paste out/4_asan.txt screenshot ]</div>
+<h2>Analysis:</h2>
+<table>
+<tr><th>Defect</th><th>No flags</th><th>-Wall -Wextra</th><th>UBSan</th><th>ASan</th></tr>
+<tr><td>int &rarr; short truncation</td><td>miss</td><td>warn</td><td>miss</td><td>miss</td></tr>
+<tr><td>signed &rarr; unsigned wrap</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
+<tr><td>float &rarr; int out of range</td><td>miss</td><td>warn</td><td>catch</td><td>miss</td></tr>
+<tr><td>bad string &rarr; atoi</td><td>miss</td><td>miss</td><td>miss</td><td>miss</td></tr>
+</table>
+<p class="body"><b>No flags</b> compiles silently and prints wrong values with no indication of a problem. <b>-Wall -Wextra</b> adds static analysis at compile time and reports the conversions that lose value where the compiler can see the constants, but it cannot see values computed at runtime. <b>UBSan</b> instruments the binary and reports the float-to-int conversion at runtime because it is undefined behaviour; it does not report the truncation or the sign conversion, since both are defined behaviour in C even though the result is not what the programmer wanted. <b>ASan</b> detects memory errors such as buffer overflow and use-after-free; this program has none, so it reports nothing, which shows ASan and UBSan cover different classes of defect and are not substitutes for each other.</p>
+<h2>Results:</h2>
+<p class="body">The four configurations were compared and each was found to catch a different subset of defects. Warnings are cheap and catch mistakes before the program runs, sanitizers catch real runtime values but only for undefined behaviour, and defined-but-incorrect conversions such as truncation, sign change and a failed atoi are caught by none of them. Compiler hardening flags therefore reduce risk but do not replace the explicit range checks written in the safe version.</p>
+</div>
