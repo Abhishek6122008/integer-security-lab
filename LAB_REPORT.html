@@ -296,25 +296,39 @@ int main(void)
 
 <div class="page">
 <h2>Compilation and Run Commands:</h2>
-<pre># -g keeps the line numbers so ASan can name the line that caused the error
-gcc -Wall -Wextra -fsanitize=address -g unsafe.c -o out/unsafe
-gcc -Wall -Wextra -fsanitize=address -g safe.c   -o out/safe
+<p class="body">The programs were written on Windows, pushed to GitHub, and then pulled onto the Linux machine where gcc and AddressSanitizer are available. Each command below was run on its own so that the output of every case could be captured separately.</p>
+<pre># 1. get the code onto the Linux machine
+git clone https://github.com/Abhishek6122008/integer-security-lab
+cd integer-security-lab/question3
 
-# normal run, no error, prints the pointer and size at each stage
+# 2. install the compiler, only needed once
+sudo apt update
+sudo apt install -y build-essential
+
+# 3. folder for the compiled programs
+mkdir -p out
+
+# 4. compile both versions, -fsanitize=address turns on ASan and
+#    -g keeps the line numbers so ASan can name the faulty line
+gcc -Wall -Wextra -fsanitize=address -g unsafe.c -o out/unsafe
+gcc -Wall -Wextra -fsanitize=address -g safe.c -o out/safe
+
+# 5. normal run, no error, prints the pointer and size at each stage
 ./out/unsafe
 
-# error (a), by default ASan aborts on an allocation this large, so
-# allocator_may_return_null=1 tells it to return NULL like a real malloc
-# would, and the unchecked write through NULL becomes the reported error
+# 6. error (a), by default ASan refuses an allocation this large and stops
+#    the program itself, so allocator_may_return_null=1 tells it to return
+#    NULL like a real malloc would, and the unchecked write through NULL
+#    becomes the error that gets reported
 ASAN_OPTIONS=allocator_may_return_null=1 ./out/unsafe 1
 
-# error (b), the read and write through the freed pointer
+# 7. error (b), the read and the write through the freed pointer
 ./out/unsafe 2
 
-# corrected version, the same option is needed because it makes the same
-# huge request, ASan hands back NULL and the NULL check catches it
+# 8. corrected version, the same option is needed because it makes the same
+#    huge request, but here the NULL is checked so nothing is dereferenced
 ASAN_OPTIONS=allocator_may_return_null=1 ./out/safe</pre>
-<p class="body">The script question3/build.sh runs all of these and saves each output into out/0_normal.txt, out/1_null_deref.txt, out/2_use_after_free.txt and out/3_safe.txt.</p>
+<p class="body">The script question3/build.sh runs steps 3 to 8 in one go and saves each output into out/0_normal.txt, out/1_null_deref.txt, out/2_use_after_free.txt and out/3_safe.txt.</p>
 <h2>ASan Diagnostic Output:</h2>
 <p class="body"><b>1. Normal run, pointer and size at each stage</b></p>
 <div class="ph">[ paste out/0_normal.txt screenshot ]</div>
@@ -341,4 +355,231 @@ ASAN_OPTIONS=allocator_may_return_null=1 ./out/safe</pre>
 </table>
 <h2>Results:</h2>
 <p class="body">The pointer value and the allocated size were printed at each stage and showed that realloc can move the block to a new address while free leaves the variable pointing at the old one. Both deliberate errors were reproduced and captured by AddressSanitizer: the unchecked allocation produced a NULL pointer dereference, and the dangling pointer produced a heap-use-after-free with the allocation, free and access sites all identified. The corrected version applied the three rules, checking every return value, initialising after allocation, and setting the pointer to NULL after free, and ran to completion under ASan with no errors, which shows that dynamic memory in C is only safe when the programmer writes these checks, since the library reports failure through the return value alone and never by itself.</p>
+</div>
+
+<div class="page">
+<h1>Lab Assignment-5</h1>
+<p><b>Aim:</b> To analyse code snippets containing common memory management errors, to identify and name the error type in each one, to state the security impact of each error, to rewrite every snippet using the correct pattern of checking return values, setting pointers to NULL after free and freeing exactly once, and to verify each fix by compiling with AddressSanitizer and showing a clean run.</p>
+<h2>Tools Used:</h2>
+<ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler with AddressSanitizer and LeakSanitizer</li><li>VS Code</li><li>Git and GitHub</li></ul>
+<h2>Classified Error Table:</h2>
+<table>
+<tr><th>#</th><th>Error type</th><th>CWE</th><th>ASan report</th><th>Security impact</th></tr>
+<tr><td>1</td><td>Unchecked allocation return value, NULL pointer dereference</td><td>CWE-690, CWE-476</td><td>SEGV on unknown address 0x000000000000</td><td>Denial of service, and a controlled write where the offset is attacker controlled or the zero page can be mapped</td></tr>
+<tr><td>2</td><td>Use after free through a dangling pointer</td><td>CWE-416</td><td>heap-use-after-free, READ and WRITE</td><td>Arbitrary code execution, plus an information leak on the read</td></tr>
+<tr><td>3</td><td>Double free</td><td>CWE-415</td><td>attempting double-free</td><td>Heap metadata corruption leading to arbitrary code execution</td></tr>
+<tr><td>4</td><td>Memory leak</td><td>CWE-401</td><td>detected memory leaks, 64 bytes in 1 object</td><td>Denial of service in a long running process</td></tr>
+</table>
+<h2>Procedure:</h2>
+<h3>a) Original Snippets (question4/original.c)</h3>
+<p class="body">The four snippets are written as four functions in one file and are selected by a command line argument, because AddressSanitizer stops the program at the first error it finds and each error therefore has to be run on its own.</p>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* the four snippets, each one with a single memory management error
+   run with 1 : return value of malloc is never checked
+   run with 2 : use after free
+   run with 3 : double free
+   run with 4 : memory leak                                          */
+
+// snippet 1, the pointer is used straight away without checking it
+void snippet1(void)
+{
+    char *p = malloc((size_t)-1);          // far too big, malloc returns NULL
+    printf("snippet 1 : malloc returned %p\n", (void *)p);
+    strcpy(p, "hello");                    // writing through a NULL pointer
+    printf("snippet 1 : %s\n", p);
+    free(p);
+}
+
+// snippet 2, the block is given back and then used again
+void snippet2(void)
+{
+    char *p = malloc(16);
+    strcpy(p, "hello");
+    free(p);                               // block goes back to the heap
+    printf("snippet 2 : %s\n", p);         // read of memory we no longer own
+    strcpy(p, "world");                    // write into that same memory
+    printf("snippet 2 : %s\n", p);
+}
+
+// snippet 3, the same address is handed back twice
+void snippet3(void)
+{
+    char *p = malloc(16);
+    strcpy(p, "data");
+    printf("snippet 3 : %s\n", p);
+    free(p);
+    free(p);                               // second free of the same block
+    printf("snippet 3 : freed twice\n");
+}
+
+// snippet 4, the block is never given back
+void snippet4(void)
+{
+    char *p = malloc(64);
+    strcpy(p, "this block is never freed");
+    printf("snippet 4 : %s\n", p);
+    // free(p) is missing, the 64 bytes stay allocated until the program ends
+}
+
+int main(int argc, char **argv)
+{
+    if (argc &lt; 2) {
+        printf("usage: %s 1|2|3|4\n", argv[0]);
+        return 1;
+    }
+    switch (argv[1][0]) {
+        case '1': snippet1(); break;
+        case '2': snippet2(); break;
+        case '3': snippet3(); break;
+        case '4': snippet4(); break;
+        default : printf("pick 1, 2, 3 or 4\n"); return 1;
+    }
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h3>b) Fixed Snippets (question4/fixed.c)</h3>
+<p class="body">Each snippet is rewritten with the correct pattern applied. Every allocation is compared with NULL before the pointer is used, every pointer is set to NULL immediately after it is freed, and every block is freed exactly once. Because none of the four can fail any more, all four run one after another in a single process, which is what makes the clean AddressSanitizer run possible.</p>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* the same four snippets with the correct pattern applied,
+   all four run one after another and the whole program is clean */
+
+// fix 1, check the return value before the pointer is touched
+void fixed1(void)
+{
+    char *p = malloc((size_t)-1);
+    if (p == NULL) {                       // this one line is the whole fix
+        printf("fix 1 : malloc failed, pointer not used\n");
+        return;
+    }
+    strcpy(p, "hello");
+    printf("fix 1 : %s\n", p);
+    free(p);
+    p = NULL;
+}
+
+// fix 2, the pointer is set to NULL as soon as the block is freed
+void fixed2(void)
+{
+    char *p = malloc(16);
+    if (p == NULL) return;
+    strcpy(p, "hello");
+    printf("fix 2 : %s\n", p);             // used while it is still ours
+    free(p);
+    p = NULL;                              // no dangling pointer is left behind
+    if (p == NULL)
+        printf("fix 2 : pointer is NULL after free, nothing to read\n");
+}
+
+// fix 3, the block is freed exactly once
+void fixed3(void)
+{
+    char *p = malloc(16);
+    if (p == NULL) return;
+    strcpy(p, "data");
+    printf("fix 3 : %s\n", p);
+    free(p);
+    p = NULL;
+    free(p);                               // free(NULL) is defined to do nothing,
+    printf("fix 3 : second free was harmless because the pointer was NULL\n");
+}
+
+// fix 4, every allocation has a matching free
+void fixed4(void)
+{
+    char *p = malloc(64);
+    if (p == NULL) return;
+    strcpy(p, "this block is freed properly");
+    printf("fix 4 : %s\n", p);
+    free(p);
+    p = NULL;
+}
+
+int main(void)
+{
+    fixed1();
+    fixed2();
+    fixed3();
+    fixed4();
+    printf("all four snippets finished, no errors\n");
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h2>Compilation and Run Commands:</h2>
+<p class="body">The snippets were written on Windows, pushed to GitHub and pulled onto the Linux machine, where gcc and AddressSanitizer are available. Each buggy snippet is run on its own, and the fixed file is run once because all four of its snippets complete without error.</p>
+<pre># 1. get the code onto the Linux machine
+git clone https://github.com/Abhishek6122008/integer-security-lab
+cd integer-security-lab/question4
+
+# 2. install the compiler, only needed once
+sudo apt update
+sudo apt install -y build-essential
+
+# 3. folder for the compiled programs
+mkdir -p out
+
+# 4. compile both files, -fsanitize=address turns on ASan and
+#    -g keeps the line numbers so ASan can name the faulty line
+gcc -Wall -Wextra -fsanitize=address -g original.c -o out/original
+gcc -Wall -Wextra -fsanitize=address -g fixed.c -o out/fixed
+
+# 5. snippet 1, ASan stops the program itself on a request this large, so
+#    allocator_may_return_null=1 makes it return NULL like a real malloc,
+#    and the unchecked write through NULL becomes the reported error
+ASAN_OPTIONS=allocator_may_return_null=1 ./out/original 1
+
+# 6. snippet 2, the read and the write through the freed pointer
+./out/original 2
+
+# 7. snippet 3, the same block freed twice
+./out/original 3
+
+# 8. snippet 4, LeakSanitizer reports the block at exit
+./out/original 4
+
+# 9. the fixed file, all four snippets in one run, ASan reports nothing
+ASAN_OPTIONS=allocator_may_return_null=1 ./out/fixed</pre>
+<p class="body">The script question4/build.sh runs steps 3 to 9 in one go and saves each output into out/1_null_deref.txt, out/2_use_after_free.txt, out/3_double_free.txt, out/4_leak.txt and out/5_fixed_clean.txt.</p>
+</div>
+
+<div class="page">
+<h2>ASan Diagnostic Output:</h2>
+<p class="body"><b>1. Snippet 1, NULL pointer dereference</b></p>
+<div class="ph">[ paste out/1_null_deref.txt screenshot ]</div>
+<p class="body"><b>2. Snippet 2, heap use after free</b></p>
+<div class="ph">[ paste out/2_use_after_free.txt screenshot ]</div>
+<p class="body"><b>3. Snippet 3, double free</b></p>
+<div class="ph">[ paste out/3_double_free.txt screenshot ]</div>
+<p class="body"><b>4. Snippet 4, memory leak</b></p>
+<div class="ph">[ paste out/4_leak.txt screenshot ]</div>
+<h2>Clean Run Evidence (question4/fixed.c):</h2>
+<p class="body"><b>5. All four fixed snippets, no errors and no leaks reported</b></p>
+<div class="ph">[ paste out/5_fixed_clean.txt screenshot ]</div>
+</div>
+
+<div class="page">
+<h2>Explanation of each error:</h2>
+<p class="body"><b>1. Unchecked allocation return value.</b> The return value is the only way malloc reports failure, there is no exception and no message. The snippet ignores it and calls strcpy on a NULL pointer, so the write goes to address 0. On a desktop this is a crash and therefore a denial of service, and it is worse in general because the fault address is the offset that was written, so a large attacker controlled index writes to a low address, which on embedded targets or wherever the zero page can be mapped becomes a controlled write instead of a crash.</p>
+<p class="body"><b>2. Use after free.</b> free returns the block to the heap but cannot change the caller's variable, because the pointer is passed by value, so the variable keeps the old address and becomes a dangling pointer. The read and the write that follow touch memory the program no longer owns. The freed block is immediately available to the next allocation, so the stale write lands inside whatever object now occupies that memory, which is the standard route to corrupting a length field or a function pointer belonging to another part of the program, and the stale read leaks whatever the new owner stored there.</p>
+<p class="body"><b>3. Double free.</b> The allocator keeps its own bookkeeping inside the heap, in the space around each block. Freeing a block that is already on the free list corrupts that bookkeeping, and a corrupted free list can be steered so that a later malloc returns an address chosen by the attacker, which is why a double free is an exploitable defect and not merely a wasted call.</p>
+<p class="body"><b>4. Memory leak.</b> The block is never freed and the only pointer to it disappears when the function returns, so the memory can never be reclaimed. A single leak of 64 bytes is harmless, but the same mistake on a path that runs once per request makes a server grow until it is killed by the out of memory killer, which is a denial of service reachable by anyone who can send requests.</p>
+<h2>The corrected pattern:</h2>
+<table>
+<tr><th>Rule</th><th>Fixes which snippet</th><th>How it is written</th></tr>
+<tr><td>Check every allocation before using it</td><td>1</td><td>if (p == NULL) return, before the pointer is touched</td></tr>
+<tr><td>Set the pointer to NULL after free</td><td>2 and 3</td><td>free(p); p = NULL; written as one pair</td></tr>
+<tr><td>Free exactly once</td><td>3</td><td>the second free sees NULL, and free(NULL) is defined to do nothing</td></tr>
+<tr><td>Every allocation has a matching free</td><td>4</td><td>free(p) added before the function returns</td></tr>
+</table>
+<h2>Results:</h2>
+<p class="body">Four memory management errors were identified and named: an unchecked allocation return value leading to a NULL pointer dereference, a use after free through a dangling pointer, a double free, and a memory leak. Each one was reproduced under AddressSanitizer, which reported SEGV on address zero, heap-use-after-free, attempting double-free, and a 64 byte leak respectively, in every case naming the line of the faulty access as well as the lines where the block was allocated and freed. Each snippet was then rewritten using the correct pattern, and the rewritten file ran all four snippets to completion with AddressSanitizer reporting no errors and no leaks. This shows that the three rules, check every return value, set the pointer to NULL after freeing it, and free exactly once, remove all four defect classes, and that two of the four are fixed by the same single line, since a pointer that is NULL can be neither dereferenced nor freed a second time.</p>
 </div>
