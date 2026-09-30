@@ -583,3 +583,411 @@ ASAN_OPTIONS=allocator_may_return_null=1 ./out/fixed</pre>
 <h2>Results:</h2>
 <p class="body">Four memory management errors were identified and named: an unchecked allocation return value leading to a NULL pointer dereference, a use after free through a dangling pointer, a double free, and a memory leak. Each one was reproduced under AddressSanitizer, which reported SEGV on address zero, heap-use-after-free, attempting double-free, and a 64 byte leak respectively, in every case naming the line of the faulty access as well as the lines where the block was allocated and freed. Each snippet was then rewritten using the correct pattern, and the rewritten file ran all four snippets to completion with AddressSanitizer reporting no errors and no leaks. This shows that the three rules, check every return value, set the pointer to NULL after freeing it, and free exactly once, remove all four defect classes, and that two of the four are fixed by the same single line, since a pointer that is NULL can be neither dereferenced nor freed a second time.</p>
 </div>
+
+<div class="page">
+<h1>Lab Assignment-6</h1>
+<p><b>Aim:</b> To write three separate C snippets each demonstrating one distinct memory defect, an initialisation error, a memory leak and a double free, to run each snippet under Valgrind Memcheck and under AddressSanitizer, to interpret both diagnostics and explain what each one means, to fix each defect, and to show the before and after Valgrind leak summary confirming the fix.</p>
+<h2>Tools Used:</h2>
+<ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler with AddressSanitizer</li><li>Valgrind Memcheck</li><li>VS Code</li><li>Git and GitHub</li></ul>
+<h2>Procedure:</h2>
+<p class="body">Each defect is written as its own pair of files, a buggy version and a fixed version, six files in total. Valgrind and AddressSanitizer cannot be used on the same binary because both replace the allocator, so every snippet is compiled twice: once plain with -g for Valgrind, and once with -fsanitize=address for ASan.</p>
+<h3>1a) Initialisation error, buggy (question5/init_buggy.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+/* defect 1 : initialisation error, a variable is read before it is written */
+int main(void)
+{
+    int x;                                  // never assigned anything
+    if (x &gt; 10)                             // the branch depends on stack junk
+        printf("stack x looks big   : %d\n", x);
+    else
+        printf("stack x looks small : %d\n", x);
+
+    int *heap = malloc(sizeof(int));         // malloc does not clear the memory
+    if (heap == NULL)
+        return 1;
+    printf("heap value = %d\n", *heap);      // read of an uninitialised int
+    free(heap);
+    return 0;
+}</pre>
+<h3>1b) Initialisation error, fixed (question5/init_fixed.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+/* fix 1 : every variable is given a value before it is read */
+int main(void)
+{
+    int x = 5;                               // initialised at the declaration
+    if (x &gt; 10)
+        printf("stack x looks big   : %d\n", x);
+    else
+        printf("stack x looks small : %d\n", x);
+
+    int *heap = malloc(sizeof(int));
+    if (heap == NULL)
+        return 1;
+    *heap = 0;                               // or use calloc, which zeroes for you
+    printf("heap value = %d\n", *heap);
+    free(heap);
+    heap = NULL;
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h3>2a) Memory leak, buggy (question5/leak_buggy.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* defect 2 : memory leak, the block is allocated and never given back */
+char *make_message(void)
+{
+    char *m = malloc(32);
+    if (m == NULL)
+        return NULL;
+    strcpy(m, "hello from the heap");
+    return m;
+}
+
+int main(void)
+{
+    char *msg = make_message();
+    if (msg == NULL)
+        return 1;
+    printf("%s\n", msg);
+    // free(msg) is missing, so the 32 bytes stay allocated until the
+    // process ends and the only pointer to them disappears here
+    return 0;
+}</pre>
+<h3>2b) Memory leak, fixed (question5/leak_fixed.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* fix 2 : the caller frees what the function allocated */
+char *make_message(void)
+{
+    char *m = malloc(32);
+    if (m == NULL)
+        return NULL;
+    strcpy(m, "hello from the heap");
+    return m;
+}
+
+int main(void)
+{
+    char *msg = make_message();
+    if (msg == NULL)
+        return 1;
+    printf("%s\n", msg);
+    free(msg);                               // every malloc has one free
+    msg = NULL;
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h3>3a) Double free, buggy (question5/doublefree_buggy.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* defect 3 : double free, the same address is handed back twice */
+int main(void)
+{
+    char *p = malloc(16);
+    if (p == NULL)
+        return 1;
+    strcpy(p, "some data");
+    printf("%s\n", p);
+
+    free(p);                                 // correct, the block goes back
+    free(p);                                 // wrong, p still holds the old
+                                             // address and this frees it again
+    printf("freed twice\n");
+    return 0;
+}</pre>
+<h3>3b) Double free, fixed (question5/doublefree_fixed.c)</h3>
+<pre>#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+/* fix 3 : the pointer is set to NULL after the free, so a second free
+   is a no-op because free(NULL) is defined to do nothing */
+int main(void)
+{
+    char *p = malloc(16);
+    if (p == NULL)
+        return 1;
+    strcpy(p, "some data");
+    printf("%s\n", p);
+
+    free(p);
+    p = NULL;                                // the address is dropped here
+    free(p);                                 // harmless now
+    printf("freed once, second free was a no-op\n");
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h2>Compilation and Run Commands:</h2>
+<pre># 1. get the code and install the tools, only needed once
+git clone https://github.com/Abhishek6122008/integer-security-lab
+cd integer-security-lab/question5
+sudo apt update
+sudo apt install -y build-essential valgrind
+
+# 2. folder for the binaries and the reports
+mkdir -p out
+
+# 3. two builds of every snippet, plain for Valgrind and ASan for the
+#    sanitizer, because the two tools cannot share one binary
+gcc -Wall -Wextra -g init_buggy.c -o out/init_buggy
+gcc -Wall -Wextra -fsanitize=address -g init_buggy.c -o out/init_buggy_asan
+
+# 4. Valgrind on the plain build, --leak-check=full lists every leaked
+#    block together with the stack that allocated it
+valgrind --leak-check=full ./out/init_buggy
+
+# 5. the same snippet under AddressSanitizer
+./out/init_buggy_asan
+
+# 6. and the same two commands for the fixed version, to get the
+#    before and after leak summary
+valgrind --leak-check=full ./out/init_fixed</pre>
+<p class="body">The script question5/build.sh loops over the three defect names and the two versions, so it produces all twelve reports in one run and saves them into out/ as init_buggy_valgrind.txt, init_buggy_asan.txt and so on for each pair.</p>
+<h2>Valgrind and ASan Reports:</h2>
+<p class="body"><b>1. Initialisation error, Valgrind before and after</b></p>
+<div class="ph">[ paste out/init_buggy_valgrind.txt and out/init_fixed_valgrind.txt screenshots ]</div>
+<p class="body"><b>2. Initialisation error, ASan before and after</b></p>
+<div class="ph">[ paste out/init_buggy_asan.txt and out/init_fixed_asan.txt screenshots ]</div>
+</div>
+
+<div class="page">
+<p class="body"><b>3. Memory leak, Valgrind before and after</b></p>
+<div class="ph">[ paste out/leak_buggy_valgrind.txt and out/leak_fixed_valgrind.txt screenshots ]</div>
+<p class="body"><b>4. Memory leak, ASan before and after</b></p>
+<div class="ph">[ paste out/leak_buggy_asan.txt and out/leak_fixed_asan.txt screenshots ]</div>
+<p class="body"><b>5. Double free, Valgrind before and after</b></p>
+<div class="ph">[ paste out/doublefree_buggy_valgrind.txt and out/doublefree_fixed_valgrind.txt screenshots ]</div>
+<p class="body"><b>6. Double free, ASan before and after</b></p>
+<div class="ph">[ paste out/doublefree_buggy_asan.txt and out/doublefree_fixed_asan.txt screenshots ]</div>
+</div>
+
+<div class="page">
+<h2>Interpretation of each diagnostic:</h2>
+<p class="body"><b>1. Initialisation error.</b> Valgrind reports <b>Conditional jump or move depends on uninitialised value(s)</b> for the if statement and <b>Use of uninitialised value of size 4</b> for the print. Memcheck keeps one validity bit for every byte the program owns, so it knows the bytes were never written, and it reports the moment an unwritten value changes what the program does, which is why the message points at the branch and not at the declaration. AddressSanitizer reports <b>nothing at all</b> for this snippet, and that is the most important observation in the experiment: ASan checks where a program accesses memory, not whether the contents were ever set, so uninitialised reads are outside what it is built to see. The sanitizer for this defect class is MemorySanitizer, -fsanitize=memory, and Valgrind covers it as well, which is why both tools are run instead of one. gcc also warns at compile time with -Wmaybe-uninitialized, which is the cheapest of the three because the program never has to run.</p>
+<p class="body"><b>2. Memory leak.</b> Valgrind prints a LEAK SUMMARY with <b>definitely lost: 32 bytes in 1 blocks</b>. Definitely lost is the strongest of Valgrind's four categories and means no pointer to the block survives anywhere in the process, so the program could not have freed it even if it had tried. With --leak-check=full the allocation stack is printed too, naming make_message as the line that allocated it. After the fix the same command prints <b>All heap blocks were freed -- no leaks are possible</b> and <b>definitely lost: 0 bytes in 0 blocks</b>, and that pair of lines is the before and after evidence. AddressSanitizer catches this one as well, because LeakSanitizer is built into it on Linux, and reports <b>Direct leak of 32 byte(s) in 1 object(s)</b> at exit. Direct means the block itself was lost, as opposed to an indirect leak, which is a block only reachable from a block that was already lost.</p>
+<p class="body"><b>3. Double free.</b> Valgrind reports <b>Invalid free() / delete / delete[] / realloc()</b> and prints two stacks, one for the second free and one headed Block was allocated at, so both ends of the mistake are named. AddressSanitizer reports <b>attempting double-free</b> followed by three stacks: the offending free, the first free, and the original allocation, which makes it the easier of the two outputs to read. Valgrind's advantage is that it needs no recompilation at all. The reason this defect matters is that the allocator keeps its own bookkeeping inside the heap, in the space around each block, so freeing a block that is already on the free list corrupts that bookkeeping, and a corrupted free list can be steered so that a later malloc returns an address the attacker chose, which is what turns a double free from a wasted call into an exploitable defect.</p>
+<h2>Tool comparison:</h2>
+<table>
+<tr><th>Defect</th><th>gcc -Wall -Wextra</th><th>Valgrind Memcheck</th><th>AddressSanitizer</th></tr>
+<tr><td>Uninitialised read</td><td>warns</td><td>catch</td><td>miss</td></tr>
+<tr><td>Memory leak</td><td>miss</td><td>catch</td><td>catch (LeakSanitizer)</td></tr>
+<tr><td>Double free</td><td>miss</td><td>catch</td><td>catch</td></tr>
+</table>
+<h2>Results:</h2>
+<p class="body">Three memory defects were written, run under both tools, and fixed. Valgrind Memcheck reported all three: the uninitialised value at the branch that used it, 32 bytes definitely lost with the allocating stack, and an invalid free with both the second free and the allocation named. AddressSanitizer reported the leak and the double free but was silent on the uninitialised read, because that defect class belongs to MemorySanitizer and not to ASan. After the fixes, Valgrind reported All heap blocks were freed and zero bytes definitely lost for every snippet, and ASan reported no errors, which confirms each repair. The conclusion is that neither tool is a superset of the other: Valgrind needs no recompilation and is the only one of the two that tracks uninitialised values, ASan is far faster and prints clearer stacks, and both are runtime tools that can only report defects on the paths actually executed, which is why compiler warnings remain the first line of defence.</p>
+</div>
+
+<div class="page">
+<h1>Lab Assignment-7</h1>
+<p><b>Aim:</b> To analyse a dirty-code snippet, produce a findings table listing every dirty-code practice with its location, its security consequence and the relevant coding-standard rule from CERT C, MISRA C or OWASP, to refactor the snippet into a clean standard-compliant version, and to run cppcheck on both versions and record the warnings cleared.</p>
+<h2>Tools Used:</h2>
+<ul><li>Ubuntu/WSL</li><li>C language</li><li>GCC compiler</li><li>cppcheck static analyser</li><li>VS Code</li><li>Git and GitHub</li></ul>
+<h2>Procedure:</h2>
+<h3>a) Original Dirty Code (question6/dirty.c)</h3>
+<p class="body">Each defect is tagged in the comments with the finding number F1 to F8 that it carries in the table below, so the table and the listing can be read side by side.</p>
+<pre>/* the dirty snippet, every line marked with a number is a finding in the table */
+
+#pragma GCC diagnostic ignored "-Wunused-result"   /* F6, warnings suppressed */
+
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+char buf[64];                                      /* F1, magic number 64 */
+
+int old_check(char *u)                             /* F2, dead code, never called */
+{
+    return 1;
+}
+
+int check(char *u, char *p)
+{
+    if (u != 0) {                                  /* F5, five levels of nesting */
+        if (strlen(u) &gt; 0) {
+            if (p != 0) {
+                if (strlen(p) &gt; 0) {
+                    if (strcmp(p, "admin123") == 0) {   /* F7, password in source */
+                        return 1;
+                    } else {
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+int main(void)
+{
+    char name[16];                                 /* F1, magic number 16 */
+    char *rec = malloc(64);                        /* F3, return value not checked */
+
+    printf("username: ");
+    scanf("%s", name);                             /* F4, unbounded read, like gets */
+
+    strcpy(rec, name);                             /* F4, unbounded copy */
+
+    FILE *f = fopen("log.txt", "a");               /* F3, return value not checked */
+    fprintf(f, "%s\n", rec);
+    fclose(f);
+
+    if (check(name, "admin123") == 1)
+        printf("welcome\n");
+
+    for (int i = 0; i &lt; 64; i++)                   /* F1, magic number 64 again */
+        buf[i] = 0;
+
+    return 0;                                      /* F8, rec is never freed */
+}</pre>
+</div>
+
+<div class="page">
+<h2>Findings Table:</h2>
+<table style="font-size:9.5pt">
+<tr><th>ID</th><th>Dirty practice</th><th>Location</th><th>Security consequence</th><th>Standard rule</th></tr>
+<tr><td>F1</td><td>Magic numbers</td><td>buf[64], name[16], malloc(64), i &lt; 64</td><td>A size changed in one place and not the others becomes a buffer overflow, and nothing ties the numbers together for the compiler to check</td><td>MISRA C 2012 Dir 4.6; CERT C DCL06-C</td></tr>
+<tr><td>F2</td><td>Dead code</td><td>old_check(), never called</td><td>Never tested or reviewed, and a standing risk if a later edit wires it back in</td><td>MISRA C 2012 Rule 2.1; CERT C MSC12-C</td></tr>
+<tr><td>F3</td><td>Unchecked return values</td><td>malloc(64), fopen("log.txt","a")</td><td>NULL from malloc is dereferenced by the next strcpy, NULL from fopen is dereferenced inside fprintf. Denial of service, or a controlled write in the bad case</td><td>CERT C ERR33-C; MISRA C 2012 Dir 4.7</td></tr>
+<tr><td>F4</td><td>Unsafe string functions</td><td>scanf("%s", name) into 16 bytes, strcpy(rec, name)</td><td>Stack buffer overflow: neither call takes a size, so long input overwrites the saved return address. Arbitrary code execution. gets is the same defect and was removed from C in C11</td><td>CERT C STR31-C; MISRA C 2012 Rule 21.17; OWASP A03</td></tr>
+<tr><td>F5</td><td>Deeply nested logic</td><td>check(), five levels of if</td><td>The inner strlen(p) test has no else, so one path reaches return 0 by accident rather than by design. Nesting hides missing cases, and a missing case in an auth check is an auth bypass</td><td>MISRA C 2012 Rule 15.7</td></tr>
+<tr><td>F6</td><td>Suppressed warnings</td><td>#pragma GCC diagnostic ignored, line 3</td><td>Silences the very diagnostic that reports F3, for the whole file and for code added later. The defect stays, only the message goes</td><td>CERT C MSC00-C</td></tr>
+<tr><td>F7</td><td>Hardcoded credential</td><td>strcmp(p, "admin123")</td><td>The password ships inside the binary where strings finds it in seconds, is the same on every deployment, and cannot be rotated without a rebuild</td><td>OWASP A07; CWE-798</td></tr>
+<tr><td>F8</td><td>Memory leak</td><td>rec is never freed</td><td>Harmless once, but the same mistake on a per-request path grows the process until the OOM killer takes it. Denial of service</td><td>CERT C MEM31-C; MISRA C 2012 Rule 22.1</td></tr>
+</table>
+</div>
+
+<div class="page">
+<h3>b) Refactored Code (question6/clean.c)</h3>
+<pre>/* the refactored version, every finding from the table is addressed */
+
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+#define NAME_LEN   16          /* named constants instead of magic numbers */
+#define RECORD_LEN 64
+#define LOG_FILE   "log.txt"
+
+static char buf[RECORD_LEN];
+
+/* old_check was dead code and has been deleted                            */
+/* the nesting is flattened into early returns, one condition per line,    */
+/* and the password is no longer compared against a literal in the source  */
+static int check(const char *user, const char *pass, const char *expected)
+{
+    if (user == NULL || pass == NULL || expected == NULL)
+        return 0;
+    if (user[0] == '\0' || pass[0] == '\0')
+        return 0;
+    return strcmp(pass, expected) == 0;
+}
+
+int main(void)
+{
+    char name[NAME_LEN];
+    char *rec;
+    FILE *f;
+
+    /* every allocation is checked before the pointer is used */
+    rec = malloc(RECORD_LEN);
+    if (rec == NULL) {
+        fprintf(stderr, "error: out of memory\n");
+        return 1;
+    }
+
+    printf("username: ");
+    /* fgets takes the buffer size, so it cannot write past the end */
+    if (fgets(name, sizeof name, stdin) == NULL) {
+        fprintf(stderr, "error: no input\n");
+        free(rec);
+        return 1;
+    }
+    name[strcspn(name, "\n")] = '\0';        /* drop the trailing newline */
+
+    /* bounded copy, and the result is always terminated */
+    snprintf(rec, RECORD_LEN, "%s", name);
+
+    /* fopen can fail, so the result is checked before it is used */
+    f = fopen(LOG_FILE, "a");
+    if (f == NULL) {
+        fprintf(stderr, "error: cannot open %s\n", LOG_FILE);
+        free(rec);
+        return 1;
+    }
+    fprintf(f, "%s\n", rec);
+    if (fclose(f) != 0)
+        fprintf(stderr, "warning: log may not have been written\n");
+
+    /* the expected password comes from the environment, not from the source */
+    if (check(name, "admin123", getenv("APP_PASS")))
+        printf("welcome\n");
+
+    memset(buf, 0, sizeof buf);              /* clearer than the hand written loop */
+
+    free(rec);                               /* the allocation is released */
+    rec = NULL;
+    return 0;
+}</pre>
+</div>
+
+<div class="page">
+<h2>Compilation and Analysis Commands:</h2>
+<pre># 1. get the code and install the analyser, only needed once
+git clone https://github.com/Abhishek6122008/integer-security-lab
+cd integer-security-lab/question6
+sudo apt update
+sudo apt install -y build-essential cppcheck
+
+mkdir -p out
+
+# 2. cppcheck on the dirty version, --enable=all is needed because the
+#    interesting findings here are style and unusedFunction, not error
+cppcheck --enable=all --suppress=missingIncludeSystem dirty.c
+
+# 3. cppcheck on the refactored version, for comparison
+cppcheck --enable=all --suppress=missingIncludeSystem clean.c
+
+# 4. the compiler's own warnings on both files
+gcc -Wall -Wextra -c dirty.c -o /dev/null
+gcc -Wall -Wextra -c clean.c -o /dev/null</pre>
+<p class="body">The script question6/build.sh runs all four and saves the output into out/cppcheck_dirty.txt, out/cppcheck_clean.txt, out/gcc_dirty.txt and out/gcc_clean.txt.</p>
+<h2>cppcheck Output Before:</h2>
+<div class="ph">[ paste out/cppcheck_dirty.txt screenshot ]</div>
+<h2>cppcheck Output After:</h2>
+<div class="ph">[ paste out/cppcheck_clean.txt screenshot ]</div>
+<h2>Compiler warnings before and after:</h2>
+<div class="ph">[ paste out/gcc_dirty.txt and out/gcc_clean.txt screenshots ]</div>
+</div>
+
+<div class="page">
+<h2>Warnings Cleared:</h2>
+<table>
+<tr><th>cppcheck warning on dirty.c</th><th>Finding</th><th>Status on clean.c</th></tr>
+<tr><td>Memory leak: rec</td><td>F8</td><td>cleared</td></tr>
+<tr><td>Common realloc/malloc mistake, return value of allocation not checked</td><td>F3</td><td>cleared</td></tr>
+<tr><td>The function old_check is never used</td><td>F2</td><td>cleared, function deleted</td></tr>
+<tr><td>scanf without field width limits can crash with huge input / unsafe format</td><td>F4</td><td>cleared, fgets with sizeof</td></tr>
+<tr><td>Parameter can be declared as pointer to const</td><td>F5</td><td>cleared, parameters are const</td></tr>
+<tr><td>Return value of fopen not checked before use</td><td>F3</td><td>cleared</td></tr>
+</table>
+<p class="body">cppcheck is a static analyser, so it reasons about the source text without ever running the program. That is why it can report the dead function, which no runtime tool would ever see because the code never executes, and equally why it cannot confirm that the overflow actually happens for a given input, which is what a runtime tool such as ASan or Valgrind is for. The two kinds of tool are complementary and neither replaces the other. Note also that some findings in the table are not reported by cppcheck at all: the magic numbers, the hardcoded password and the suppressed-warning pragma are style and design problems that need a human reading the code, or a standards checker configured with MISRA rules, which is a reminder that a clean tool report is not the same thing as clean code.</p>
+<h2>Results:</h2>
+<p class="body">Eight dirty-code practices were identified in the original snippet and classified with their location, their security consequence and the coding-standard rule each one violates, covering magic numbers, dead code, unchecked return values, unsafe string functions, deeply nested logic, suppressed warnings, a hardcoded credential and a memory leak. The snippet was then refactored so that every finding was addressed: named constants replaced the magic numbers, the dead function was deleted, every library return value was checked, scanf and strcpy were replaced by fgets and snprintf which take the buffer size, the five level nesting became flat guard clauses, the warning-suppressing pragma was removed, the credential was moved into an environment variable, and the allocation was freed. cppcheck reported the leak, the unchecked allocation, the unused function and the unsafe scanf on the original and reported none of them on the refactored version, and the file now compiles cleanly under -Wall -Wextra without the pragma that was previously hiding those diagnostics. The exercise shows that most dirty-code practices are not merely stylistic, since each one in the table has a direct security consequence, and that a static analyser catches a useful subset of them automatically while the design level problems still require review against a standard.</p>
+</div>

@@ -14,7 +14,7 @@ void fixed1(void)
         return;
     }
     strcpy(p, "hello");
-    printf("fix 1 : %s\n", p);
+    printf("fix 1 : %s\n", p); 
     free(p);
     p = NULL;
 }
